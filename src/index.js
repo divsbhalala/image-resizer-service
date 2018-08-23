@@ -74,13 +74,20 @@ const postProcessResource = (resource, fn) => {
     return ret;
 };
 
-const getResizedFile = (bucket, key, width, height, callback) => {
+const getResizedFile = (bucket, key, width, height, queryParameters, callback) => {
     console.log(`INFO: Returning resized version`);
     getFileFromBucket(bucket, key)
         .then((data) => {
             try {
 
                 const resizedFile = `/tmp/resized.${bucket}.${key}.${width}.${height}`;
+				let quality = queryParameters.quality ? queryParameters.quality.quality:  0.8;
+				let gravity = queryParameters.gravity ? queryParameters.quality.gravity:  "Center";
+				let crop = queryParameters.crop ? queryParameters.quality.crop: false;
+				let progressive = queryParameters.progressive ? queryParameters.quality.progressive: false;
+				let strip = queryParameters.strip ? queryParameters.quality.strip: true;
+				let filter = queryParameters.filter ? queryParameters.quality.filter: null;
+				let sharpening = queryParameters.sharpening ? queryParameters.quality.sharpening: null;
 
                 const resizeCallback = (err) => {
                     if (err) {
@@ -107,22 +114,36 @@ const getResizedFile = (bucket, key, width, height, callback) => {
                         });
                     }
                 };
+                let arg = {
+					width: width,
+					srcData: data.Body,
+					dstPath: resizedFile,
+					quality: quality
+                };
+                if(progressive){
+                    arg.progressive = progressive
+                }
+                if(strip){
+                    arg.progressive = strip
+                }
+                if(filter){
+                    arg.progressive = filter
+                }
+                if(sharpening){
+                    arg.progressive = sharpening
+                }
+                if(height){
+                    arg.height = height
+                }
 
-                if (height) {
-                    im.crop({
-                        width: width,
-                        height: height,
-                        srcData: data.Body,
-                        dstPath: resizedFile,
-                        quality: 1,
-                        gravity: "Center"
-                    }, resizeCallback);
+                if (height && crop) {
+					arg.gravity = gravity
+                    im.crop(arg, resizeCallback);
+                }
+                else if (height) {
+                    im.resize(arg, resizeCallback);
                 } else {
-                    im.resize({
-                        width: width,
-                        srcData: data.Body,
-                        dstPath: resizedFile
-                    }, resizeCallback);
+                    im.resize(arg, resizeCallback);
                 }
             } catch (err) {
                 console.log('ERROR: Resize operation failed:', err);
@@ -159,5 +180,5 @@ exports.handler = (event, context, callback) => {
         return errorResponse(callback, "width and height parameters must be integer", 400);
     }
 
-    return getResizedFile(imageBucket, objectKey, width, height, callback);
+    return getResizedFile(imageBucket, objectKey, width, height, queryParameters, callback);
 };
