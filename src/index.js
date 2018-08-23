@@ -2,19 +2,11 @@
 
 //import aws from 'aws-sdk';
 const aws = require("aws-sdk");
-const s3 = new aws.S3();
-const im = require('imagemagick');
-const fs = require('fs');
-
+const S3 = new aws.S3();
+const Sharp = require('sharp');
 const imageBucket = process.env.IMAGE_BUCKET;
+const URL = "https://client-relation.s3.us-west-2.amazonaws.com";
 
-const getFileFromBucket = (bucket, key) => {
-    console.log(`INFO: Getting image from s3://${bucket}/${key}`);
-    return s3.getObject({
-        Bucket: bucket,
-        Key: key
-    }).promise();
-};
 
 const sendResponse = (callback, body, contentType, statusCode, errorMessage) => {
     const response = {
@@ -27,10 +19,6 @@ const sendResponse = (callback, body, contentType, statusCode, errorMessage) => 
         isBase64Encoded: true
     };
     return callback(null, response);
-};
-
-const successResponse = (callback, body, contentType) => {
-    return sendResponse(callback, body, contentType, 200);
 };
 
 const errorResponse = (callback, body, statusCode, err) => {
@@ -46,115 +34,6 @@ const errorResponse = (callback, body, statusCode, err) => {
     return sendResponse(callback, new Buffer(onePixelGif).toString('base64'), 'image/gif', statusCode, body);
 };
 
-
-const getOriginalFile = (bucket, key, callback) => {
-    console.log(`INFO: Returning original`);
-
-    getFileFromBucket(bucket, key)
-        .then((data) => {
-            successResponse(callback, data.Body.toString('base64'), 'image/jpeg');
-        })
-        .catch((err) => {
-            return errorResponse(callback, null, 404, err)
-        });
-};
-
-const postProcessResource = (resource, fn) => {
-    let ret = null;
-    if (resource) {
-        if (fn) {
-            ret = fn(resource);
-        }
-        try {
-            fs.unlinkSync(resource);
-        } catch (err) {
-            // Ignore
-        }
-    }
-    return ret;
-};
-
-const getResizedFile = (bucket, key, width, height, queryParameters, callback) => {
-    console.log(`INFO: Returning resized version`);
-    getFileFromBucket(bucket, key)
-        .then((data) => {
-            try {
-
-                const resizedFile = `/tmp/resized.${bucket}.${key}.${width}.${height}`;
-				let quality = queryParameters.quality ? queryParameters.quality.quality:  0.8;
-				let gravity = queryParameters.gravity ? queryParameters.quality.gravity:  "Center";
-				let crop = queryParameters.crop ? queryParameters.quality.crop: false;
-				let progressive = queryParameters.progressive ? queryParameters.quality.progressive: false;
-				let strip = queryParameters.strip ? queryParameters.quality.strip: true;
-				let filter = queryParameters.filter ? queryParameters.quality.filter: null;
-				let sharpening = queryParameters.sharpening ? queryParameters.quality.sharpening: null;
-
-                const resizeCallback = (err) => {
-                    if (err) {
-                        throw err;
-                    } else {
-                        console.log('INFO: Resize operation completed successfully');
-                        im.identify(resizedFile, (err, result) => {
-                            let mimeType;
-                            switch (result.format) {
-                                case 'GIF':
-                                    mimeType = 'image/gif';
-                                    break;
-                                case 'PNG':
-                                    mimeType = 'image/png';
-                                    break;
-                                default:
-                                    mimeType = 'image/jpeg';
-                            }
-                            callback(null,
-                                postProcessResource(resizedFile, (file) => {
-                                    return successResponse(callback, new Buffer(fs.readFileSync(file)).toString('base64'), mimeType)
-                                })
-                            );
-                        });
-                    }
-                };
-                let arg = {
-					width: width,
-					srcData: data.Body,
-					dstPath: resizedFile,
-					quality: quality
-                };
-                if(progressive){
-                    arg.progressive = progressive
-                }
-                if(strip){
-                    arg.progressive = strip
-                }
-                if(filter){
-                    arg.progressive = filter
-                }
-                if(sharpening){
-                    arg.progressive = sharpening
-                }
-                if(height){
-                    arg.height = height
-                }
-
-                if (height && crop) {
-					arg.gravity = gravity
-                    im.crop(arg, resizeCallback);
-                }
-                else if (height) {
-                    im.resize(arg, resizeCallback);
-                } else {
-                    im.resize(arg, resizeCallback);
-                }
-            } catch (err) {
-                console.log('ERROR: Resize operation failed:', err);
-                return errorResponse(callback, null, 500, err.message);
-            }
-
-
-        }).catch((err) => errorResponse(callback, err));
-};
-
-
 exports.handler = (event, context, callback) => {
 
 
@@ -168,17 +47,139 @@ exports.handler = (event, context, callback) => {
     const queryParameters = event.queryStringParameters || {};
 
 
-    if (!queryParameters.width && !queryParameters.height) {
-        return getOriginalFile(imageBucket, objectKey, callback);
-    }
+    // if (!queryParameters.width && !queryParameters.height) {
+    //     return getOriginalFile(imageBucket, objectKey, callback);
+    // }
 
     const width = parseInt(queryParameters.width);
     const height = parseInt(queryParameters.height);
+	const scale = parseInt(queryParameters.height, 10);
 
 
     if ((queryParameters.width && isNaN(width)) || (queryParameters.height && isNaN(height))) {
         return errorResponse(callback, "width and height parameters must be integer", 400);
     }
+	var key = objectKey;
+	var originalKey = objectKey;
+	var params = {
+		Bucket: imageBucket,
+		Key: key
+	};
 
-    return getResizedFile(imageBucket, objectKey, width, height, queryParameters, callback);
+    //return getResizedFile(imageBucket, objectKey, width, height, queryParameters, callback);
+	S3.headObject(params, function (err, metadata) {
+		if (err && err.code === 'NotFound') {
+			if(scale >= 3) { // wrap in canvas
+				S3.getObject({Bucket: imageBucket, Key: originalKey}).promise()
+				.then((data) => Sharp(data.Body)
+					.rotate()
+					.resize(width, height)
+					.max()
+					.toFormat('png')
+					.toBuffer()
+					.then((buffer) => Sharp(null, {
+							create: {
+								width: width,
+								height: height,
+								channels: 3,
+								background: { r: 255, g: 255, b: 255 }
+							}
+						})
+						.toFormat('png')
+						.overlayWith(buffer)
+						.toFormat('jpeg', {quality: 50})
+						.toBuffer()
+						.then((buffer) => S3.putObject({
+								Body: buffer,
+								Bucket: imageBucket,
+								ContentType: 'image/jpeg',
+								Key: key
+							}).promise()
+						)
+					)
+				)
+				.then(() => context.succeed({
+						statusCode: '301',
+						headers: {'location': `${URL}/${key}`},
+						body: ''
+					})
+				)
+				.catch((err) => context.fail(err))
+			} else if(scale >= 2) { // shrink image
+				S3.getObject({Bucket: imageBucket, Key: originalKey}).promise()
+				.then((data) => Sharp(data.Body)
+					.rotate()
+					.ignoreAspectRatio()
+					.resize(width, height)
+					.toFormat('jpeg', {quality: 50})
+					.toBuffer()
+				)
+				.then((buffer) => S3.putObject({
+						Body: buffer,
+						Bucket: imageBucket,
+						ContentType: 'image/jpeg',
+						Key: key
+					}).promise()
+				)
+				.then(() => context.succeed({
+						statusCode: '301',
+						headers: {'location': `${URL}/${key}`},
+						body: ''
+					})
+				)
+				.catch((err) => context.fail(err))
+			} else if (scale >= 1) {  // fit image
+				S3.getObject({Bucket: imageBucket, Key: originalKey}).promise()
+				.then((data) => Sharp(data.Body)
+					.rotate()
+					.resize(width, height)
+					.max()
+					.toFormat('jpeg', {quality: 50})
+					.toBuffer()
+				)
+				.then((buffer) => S3.putObject({
+						Body: buffer,
+						Bucket: imageBucket,
+						ContentType: 'image/jpeg',
+						Key: key
+					}).promise()
+				)
+				.then(() => context.succeed({
+						statusCode: '301',
+						headers: {'location': `${URL}/${key}`},
+						body: ''
+					})
+				)
+				.catch((err) => context.fail(err))
+			} else { // crop image
+				S3.getObject({Bucket: imageBucket, Key: originalKey}).promise()
+				.then((data) => Sharp(data.Body)
+					.rotate()
+					.resize(width, height)
+					.toFormat('jpeg', {quality: 50})
+					.toBuffer()
+				)
+				.then((buffer) => S3.putObject({
+						Body: buffer,
+						Bucket: imageBucket,
+						ContentType: 'image/jpeg',
+						Key: key
+					}).promise()
+				)
+				.then(() => context.succeed({
+						statusCode: '301',
+						headers: {'location': `${URL}/${key}`},
+						body: ''
+					})
+				)
+				.catch((err) => context.fail(err))
+			}
+		} else {
+			context.succeed({
+				statusCode: '301',
+				headers: {'location': `${URL}/${key}`},
+				body: ''
+			})
+		}
+	});
 };

@@ -17,6 +17,7 @@ module.exports = {
     externals: [
         //provided by Lambda runtime
         "aws-sdk",
+        "sharp",
         "imagick"
     ],
     module: {
