@@ -79,7 +79,7 @@ const getResizedFile = (bucket, key, width, height, callback) => {
     getFileFromBucket(bucket, key)
         .then((data) => {
             try {
-
+                key = key.replace(/\//g,'.');
                 const resizedFile = `/tmp/resized.${bucket}.${key}.${width}.${height}`;
 
                 const resizeCallback = (err) => {
