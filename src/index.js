@@ -79,15 +79,15 @@ const getResizedFile = (bucket, key, width, height, queryParameters, callback) =
     getFileFromBucket(bucket, key)
         .then((data) => {
             try {
-
+		key = key.replace(/\//g,'.');
                 const resizedFile = `/tmp/resized.${bucket}.${key}.${width}.${height}`;
-				let quality = queryParameters.quality ? queryParameters.quality.quality:  0.8;
-				let gravity = queryParameters.gravity ? queryParameters.quality.gravity:  "Center";
-				let crop = queryParameters.crop ? queryParameters.quality.crop: false;
-				let progressive = queryParameters.progressive ? queryParameters.quality.progressive: false;
-				let strip = queryParameters.strip ? queryParameters.quality.strip: true;
-				let filter = queryParameters.filter ? queryParameters.quality.filter: null;
-				let sharpening = queryParameters.sharpening ? queryParameters.quality.sharpening: null;
+				let quality = queryParameters.quality ? queryParameters.quality:  0.8;
+				let gravity = queryParameters.gravity ? queryParameters.gravity:  "Center";
+				let crop = queryParameters.crop ? queryParameters.crop: false;
+				let progressive = queryParameters.progressive ? queryParameters.progressive: false;
+				let strip = queryParameters.strip ? queryParameters.strip: true;
+				let filter = queryParameters.filter ? queryParameters.filter: null;
+				let sharpening = queryParameters.sharpening ? queryParameters.sharpening: null;
 
                 const resizeCallback = (err) => {
                     if (err) {
